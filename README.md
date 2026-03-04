@@ -47,81 +47,63 @@ Real-time Kanban board, logs, deployment controls.
 - **Traefik** on `coolify` network
 - **Domains** with DNS pointed to your VPS
 
-### Step 1: Clone & Install
+### Quick Setup (Automated)
 
 ```bash
 git clone https://github.com/yourusername/app-factory.git
 cd app-factory
 
-# Scheduler
-cd scripts/scheduler
-npm install && npm run build
-cd ../..
-
-# Dashboard
-cd apps/factory-dashboard
-npm install
-cd ../..
+# Run automated setup (checks prerequisites, installs dependencies, configures cron)
+./setup.sh --domain dashboard.example.com --password your-secure-password
 ```
 
-### Step 2: Environment Setup
+**What `setup.sh` does:**
+- ✓ Verifies Docker, Docker Compose v2, Node.js 18+
+- ✓ Checks Docker socket access
+- ✓ Generates `.env` with secure secrets
+- ✓ Installs scheduler and dashboard dependencies
+- ✓ Configures scheduler cron job (every 5 minutes)
+- ✓ Provides next steps
 
-Create `.env` in `apps/factory-dashboard/`:
+After setup completes:
 
 ```bash
+# 1. Deploy the dashboard
+cd apps/factory-dashboard
+./deploy.sh
+
+# 2. Access dashboard at https://dashboard.example.com
+# 3. Create your first app
+./scripts/bootstrap.sh my-app my-app.example.com
+```
+
+### Manual Setup (if needed)
+
+Skip this if you used `setup.sh` above.
+
+```bash
+# Clone and navigate
+git clone https://github.com/yourusername/app-factory.git
+cd app-factory
+
+# Install dependencies
+cd scripts/scheduler && npm install && npm run build && cd ../..
+cd apps/factory-dashboard && npm install && npx prisma generate && cd ../..
+
+# Create .env
+cat > apps/factory-dashboard/.env << EOF
 DATABASE_URL="file:../../factory.db"
 ADMIN_PASSWORD="your-secure-password"
 DASHBOARD_SESSION_SECRET="$(openssl rand -hex 32)"
 NODE_ENV=production
+EOF
+
+# Deploy dashboard
+cd apps/factory-dashboard && ./deploy.sh && cd ../..
+
+# Add scheduler to crontab
+(crontab -l 2>/dev/null; echo "*/5 * * * * /path/to/app-factory/scripts/scheduler.sh >> /path/to/app-factory/factory.log 2>&1") | crontab -
 ```
-
-### Step 3: Database & Prisma
-
-```bash
-cd apps/factory-dashboard
-npx prisma generate
-cd ../..
-```
-
-### Step 4: Deploy Dashboard (Following Bootstrap Process)
-
-Run the bootstrap to properly set up the dashboard:
-
-```bash
-./scripts/bootstrap.sh factory-dashboard dashboard.your-domain.com
-```
-
-This will:
-- Create proper Docker configuration
-- Set up Traefik labels for HTTPS
-- Register in `factory.db`
-- Schedule deployment tasks
-
-**Manual alternative** (if needed):
-
-```bash
-cd apps/factory-dashboard
-npm run build
-docker build -t factory-dashboard:latest .
-cd ../..
-
-# Update docker-compose.yml in apps/factory-dashboard with:
-# - DATABASE_URL environment variable
-# - Traefik labels (Host rule, HTTPS, TLS resolver)
-# - coolify network
-# - Volume mounts for factory.db
-
-docker compose -f apps/factory-dashboard/docker-compose.yml up -d
-```
-
-### Step 5: Scheduler in Cron
-
-Add to crontab:
-```bash
-*/5 * * * * /path/to/app-factory/scripts/scheduler.sh >> /path/to/app-factory/factory.log 2>&1
-```
-
-Or use systemd timer for better reliability.
 
 ---
 
@@ -167,6 +149,7 @@ Tasks are automatically routed to specialized agents:
 
 ```
 app-factory/
+├── setup.sh                # Automated setup (prerequisites, deps, cron)
 ├── factory.db              # Central task & project database
 ├── factory.log             # Scheduler logs
 ├── CLAUDE.md               # Agent instructions

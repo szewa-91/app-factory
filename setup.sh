@@ -115,13 +115,14 @@ TRAEFIK_RUNNING=$(docker ps --filter name=traefik --quiet 2>/dev/null | head -1)
 [ -z "$TRAEFIK_RUNNING" ] && TRAEFIK_RUNNING=$(docker ps --filter name=coolify-proxy --quiet 2>/dev/null | head -1)
 [ -z "$TRAEFIK_RUNNING" ] && TRAEFIK_RUNNING=$(docker ps --filter "label=app.coolify.managed=true" --quiet 2>/dev/null | head -1)
 
-if [ -z "$COOLIFY_NETWORK" ] || [ -z "$TRAEFIK_RUNNING" ]; then
-    echo -e "${YELLOW}⚠ Traefik or 'coolify' network not found${NC}"
-    echo ""
-
-    if [ -z "$SETUP_TRAEFIK" ]; then
-        echo "Would you like to set up Traefik now? (y/n)"
+if [ "$SETUP_TRAEFIK" != "no" ] && ([ -z "$COOLIFY_NETWORK" ] || [ -z "$TRAEFIK_RUNNING" ]); then
+    # Only try to setup if not explicitly disabled
+    if [ "$SETUP_TRAEFIK" != "yes" ] && [ -z "$SETUP_TRAEFIK" ]; then
+        echo -e "${YELLOW}⚠ Traefik or 'coolify' network not found${NC}"
+        echo ""
+        echo "Would you like to set up Traefik now? (y/n, default n for localhost mode)"
         read -p "> " SETUP_TRAEFIK
+        SETUP_TRAEFIK=${SETUP_TRAEFIK:-n}
     fi
 
     if [[ "$SETUP_TRAEFIK" =~ ^[yY]$ ]] || [ "$SETUP_TRAEFIK" = "yes" ]; then
@@ -198,15 +199,34 @@ echo ""
 echo -e "${YELLOW}[2/6]${NC} Setting up environment..."
 echo ""
 
-# Prompt for domain if not provided
-if [ -z "$DOMAIN" ]; then
-    echo "Enter dashboard domain (e.g., dashboard.example.com):"
-    read -p "> " DOMAIN
+# Ask about deployment mode if not specified
+if [ -z "$DOMAIN" ] && [ -z "$SETUP_TRAEFIK" ]; then
+    echo "Deployment mode:"
+    echo "  1) Development (localhost-only, no Traefik)"
+    echo "  2) Production (with Traefik, requires domain)"
+    read -p "Choose (1 or 2, default 1): " MODE
+    MODE=${MODE:-1}
+
+    if [ "$MODE" = "2" ]; then
+        SETUP_TRAEFIK="yes"
+    fi
 fi
 
+# Prompt for domain only if production mode
+if [ "$SETUP_TRAEFIK" = "yes" ] && [ -z "$DOMAIN" ]; then
+    echo ""
+    echo "Enter dashboard domain (e.g., dashboard.example.com):"
+    read -p "> " DOMAIN
+
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}✗ Domain is required for production mode${NC}"
+        exit 1
+    fi
+fi
+
+# For localhost mode, use a placeholder domain
 if [ -z "$DOMAIN" ]; then
-    echo -e "${RED}✗ Domain is required${NC}"
-    exit 1
+    DOMAIN="localhost"
 fi
 
 # Prompt for password if not provided
@@ -307,11 +327,19 @@ echo -e "   ${YELLOW}cd $FACTORY_ROOT/apps/factory-dashboard${NC}"
 echo -e "   ${YELLOW}./deploy.sh${NC}"
 echo ""
 echo "2. Access the dashboard:"
-echo -e "   ${YELLOW}https://$DOMAIN${NC}"
+if [ "$DOMAIN" = "localhost" ]; then
+    echo -e "   ${YELLOW}http://localhost:3000${NC}"
+else
+    echo -e "   ${YELLOW}https://$DOMAIN${NC}"
+fi
 echo -e "   Password: ${YELLOW}$PASSWORD${NC}"
 echo ""
 echo "3. Create your first app:"
-echo -e "   ${YELLOW}$FACTORY_ROOT/scripts/bootstrap.sh my-app my-app.example.com${NC}"
+if [ "$DOMAIN" = "localhost" ]; then
+    echo -e "   ${YELLOW}$FACTORY_ROOT/scripts/bootstrap.sh my-app${NC}"
+else
+    echo -e "   ${YELLOW}$FACTORY_ROOT/scripts/bootstrap.sh my-app my-app.example.com${NC}"
+fi
 echo ""
 echo "4. Monitor logs:"
 echo -e "   ${YELLOW}tail -f $FACTORY_ROOT/factory.log${NC}"

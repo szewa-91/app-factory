@@ -44,7 +44,9 @@ Real-time Kanban board, logs, deployment controls.
 - **VPS** with Linux (Ubuntu 20.04+, Debian 11+)
 - **Docker** + Docker Compose v2
 - **Node.js 18+** (for scheduler)
-- **Traefik** on `coolify` network
+
+**Optional (for production):**
+- **Traefik** (reverse proxy with Let's Encrypt HTTPS)
 - **Domains** with DNS pointed to your VPS
 
 ### Quick Setup (Automated)
@@ -53,8 +55,8 @@ Real-time Kanban board, logs, deployment controls.
 git clone https://github.com/yourusername/app-factory.git
 cd app-factory
 
-# Run automated setup (checks prerequisites, installs dependencies, configures cron)
-./setup.sh --domain dashboard.example.com --password your-secure-password
+# Run setup (interactive mode)
+./setup.sh
 ```
 
 **What `setup.sh` does:**
@@ -63,18 +65,40 @@ cd app-factory
 - ✓ Generates `.env` with secure secrets
 - ✓ Installs scheduler and dashboard dependencies
 - ✓ Configures scheduler cron job (every 5 minutes)
-- ✓ Provides next steps
+- ✓ Optionally sets up Traefik for production
 
-After setup completes:
+#### Deployment Modes
+
+**Development (localhost-only)**
+```bash
+./setup.sh  # Skip Traefik setup when prompted
+```
+- Apps accessible on `localhost:3000`, `localhost:3001`, etc.
+- No HTTPS, no domains needed
+- Perfect for testing & development
+
+**Production (with Traefik)**
+```bash
+./setup.sh --domain dashboard.example.com --setup-traefik
+```
+- Apps accessible via single domain with HTTPS
+- Let's Encrypt SSL certificates
+- Virtual host routing
+- Requires DNS pointing to your VPS
+
+#### After Setup
 
 ```bash
 # 1. Deploy the dashboard
 cd apps/factory-dashboard
 ./deploy.sh
 
-# 2. Access dashboard at https://dashboard.example.com
+# 2. Access dashboard
+#    Development: http://localhost:3000 (password from setup)
+#    Production:  https://dashboard.example.com (password from setup)
+
 # 3. Create your first app
-./scripts/bootstrap.sh my-app my-app.example.com
+./scripts/bootstrap.sh my-app my-app.example.com  # or just "my-app" for localhost mode
 ```
 
 ### Manual Setup (if needed)

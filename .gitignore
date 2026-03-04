@@ -5,6 +5,8 @@ factory.db
 factory.db-journal
 apps/*
 !apps/.gitkeep
+!apps/factory-dashboard/
+!apps/factory-dashboard/**
 .env
 .DS_Store
 dist/

@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    container_name: app-factory-factory-dashboard
+    restart: always
+    networks:
+      - coolify
+    user: "1000:1000"
+    group_add:
+      - "988"
+    volumes:
+      - ../../:/app-factory:rw
+      - ../../factory.db:/app/factory.db
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/factory.db
+      - LOGS_DIR=/app-factory
+      - PORT=3001
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.factory-dashboard.rule=Host(`dashboard.marcinszewczyk.pl`)"
+      - "traefik.http.routers.factory-dashboard.entrypoints=https"
+      - "traefik.http.routers.factory-dashboard.tls=true"
+      - "traefik.http.routers.factory-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.factory-dashboard.loadbalancer.server.port=3001"
+
+networks:
+  coolify:
+    external: true

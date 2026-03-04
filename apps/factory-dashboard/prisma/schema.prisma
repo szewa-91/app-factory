@@ -1,0 +1,35 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  name       String    @id
+  port       Int?
+  domain     String?
+  created_at DateTime? @default(now())
+
+  @@map("projects")
+}
+
+model Task {
+  id             Int       @id @default(autoincrement())
+  project_name   String?
+  title          String?
+  status         String?   @default("TRIAGE")
+  priority       Int?
+  description    String?
+  created_at     DateTime? @default(now())
+  updated_at     DateTime? @updatedAt
+  retry_count    Int?      @default(0)
+  depends_on     String?
+  audit_notes    String?
+  assigned_agent String?
+
+  @@map("tasks")
+}

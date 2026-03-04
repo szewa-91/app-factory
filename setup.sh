@@ -245,6 +245,21 @@ fi
 # Generate session secret
 SESSION_SECRET=$(openssl rand -hex 32)
 
+# Ask about AI Agent credentials
+echo ""
+echo -e "${BLUE}AI Agent Configuration${NC} (at least one required)"
+echo "Leave blank if using authenticated access (OAuth) or will add later"
+echo ""
+
+read -p "Anthropic API Key (ANTHROPIC_API_KEY): " ANTHROPIC_API_KEY
+read -p "OpenAI API Key (OPENAI_API_KEY): " OPENAI_API_KEY
+read -p "Google API Key (GOOGLE_API_KEY): " GOOGLE_API_KEY
+
+if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$GOOGLE_API_KEY" ]; then
+    echo -e "${YELLOW}⚠ No API keys provided${NC}"
+    echo "   You can add them later to $ENV_FILE"
+fi
+
 # Create .env file
 mkdir -p "$(dirname "$ENV_FILE")"
 cat > "$ENV_FILE" << EOF
@@ -258,6 +273,11 @@ DASHBOARD_SESSION_SECRET="$SESSION_SECRET"
 # Server
 NODE_ENV=production
 NEXTAUTH_URL="https://$DOMAIN"
+
+# AI Agents (at least one required for scheduler to work)
+$([ -n "$ANTHROPIC_API_KEY" ] && echo "ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"" || echo "# ANTHROPIC_API_KEY=\"sk-ant-...\"")
+$([ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=\"$OPENAI_API_KEY\"" || echo "# OPENAI_API_KEY=\"sk-...\"")
+$([ -n "$GOOGLE_API_KEY" ] && echo "GOOGLE_API_KEY=\"$GOOGLE_API_KEY\"" || echo "# GOOGLE_API_KEY=\"...\"")
 EOF
 
 echo -e "${GREEN}✓ Created${NC} $ENV_FILE"

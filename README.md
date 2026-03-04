@@ -41,9 +41,15 @@ Real-time Kanban board, logs, deployment controls.
 ## 📦 Installation
 
 ### Prerequisites
+
+**Required:**
 - **VPS** with Linux (Ubuntu 20.04+, Debian 11+)
 - **Docker** + Docker Compose v2
 - **Node.js 18+** (for scheduler)
+- **At least one AI Agent** (choose one or more):
+  - **Claude** (Anthropic) - `ANTHROPIC_API_KEY`
+  - **GPT/Codex** (OpenAI) - `OPENAI_API_KEY`
+  - **Gemini** (Google) - `GOOGLE_API_KEY`
 
 **Optional (for production):**
 - **Traefik** (reverse proxy with Let's Encrypt HTTPS)
@@ -85,6 +91,25 @@ cd app-factory
 - Let's Encrypt SSL certificates
 - Virtual host routing
 - Requires DNS pointing to your VPS
+
+#### Configure AI Agents
+
+After running setup, configure your API keys in `apps/factory-dashboard/.env`:
+
+```bash
+# Add at least ONE of these:
+
+# Anthropic Claude
+ANTHROPIC_API_KEY="sk-ant-..."
+
+# OpenAI GPT/Codex
+OPENAI_API_KEY="sk-..."
+
+# Google Gemini
+GOOGLE_API_KEY="..."
+```
+
+**Note:** If using authenticated access (OAuth) instead of API keys, you can skip this step if you're running the scheduler on a machine with authenticated sessions.
 
 #### After Setup
 

@@ -18,6 +18,31 @@ ENV_FILE="$FACTORY_ROOT/apps/factory-dashboard/.env"
 CRON_SCHEDULE="*/5 * * * *"
 CRON_COMMENT="App Factory Scheduler"
 
+# Parse command line arguments early
+DOMAIN=""
+PASSWORD=""
+SETUP_TRAEFIK=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+        --password)
+            PASSWORD="$2"
+            shift 2
+            ;;
+        --setup-traefik)
+            SETUP_TRAEFIK="yes"
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 echo -e "${BLUE}🏭 App Factory Setup${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
@@ -77,31 +102,101 @@ fi
 echo ""
 
 # ============================================================================
+# STEP 1.5: Check Traefik & coolify Network
+# ============================================================================
+
+echo -e "${YELLOW}[1.5/6]${NC} Checking Traefik setup..."
+echo ""
+
+COOLIFY_NETWORK=$(docker network ls --filter name=^coolify$ --quiet 2>/dev/null || echo "")
+# Check for reverse proxy by looking for common containers (traefik, proxy, coolify-proxy)
+TRAEFIK_RUNNING=$(docker ps --filter name=traefik --quiet 2>/dev/null | head -1)
+[ -z "$TRAEFIK_RUNNING" ] && TRAEFIK_RUNNING=$(docker ps --filter name=proxy --quiet 2>/dev/null | head -1)
+[ -z "$TRAEFIK_RUNNING" ] && TRAEFIK_RUNNING=$(docker ps --filter name=coolify-proxy --quiet 2>/dev/null | head -1)
+[ -z "$TRAEFIK_RUNNING" ] && TRAEFIK_RUNNING=$(docker ps --filter "label=app.coolify.managed=true" --quiet 2>/dev/null | head -1)
+
+if [ -z "$COOLIFY_NETWORK" ] || [ -z "$TRAEFIK_RUNNING" ]; then
+    echo -e "${YELLOW}⚠ Traefik or 'coolify' network not found${NC}"
+    echo ""
+
+    if [ -z "$SETUP_TRAEFIK" ]; then
+        echo "Would you like to set up Traefik now? (y/n)"
+        read -p "> " SETUP_TRAEFIK
+    fi
+
+    if [[ "$SETUP_TRAEFIK" =~ ^[yY]$ ]] || [ "$SETUP_TRAEFIK" = "yes" ]; then
+        echo ""
+        echo "Setting up Traefik..."
+
+        # Create traefik docker-compose file
+        mkdir -p "$FACTORY_ROOT/infra"
+        cat > "$FACTORY_ROOT/infra/docker-compose.traefik.yml" << 'EOF'
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--entrypoints.http.address=:80"
+      - "--entrypoints.https.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@example.com"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./acme.json:/acme.json
+    networks:
+      - coolify
+    environment:
+      - TRAEFIK_DASHBOARD=true
+
+networks:
+  coolify:
+    driver: bridge
+EOF
+
+        # Create coolify network if needed
+        if [ -z "$COOLIFY_NETWORK" ]; then
+            docker network create coolify 2>/dev/null || true
+            echo -e "${GREEN}✓ Created 'coolify' network${NC}"
+        fi
+
+        # Start Traefik
+        touch "$FACTORY_ROOT/infra/acme.json"
+        chmod 600 "$FACTORY_ROOT/infra/acme.json"
+        docker compose -f "$FACTORY_ROOT/infra/docker-compose.traefik.yml" up -d
+
+        echo -e "${GREEN}✓ Traefik started${NC}"
+        echo "  Dashboard: http://localhost:8080"
+        echo "  Config file: $FACTORY_ROOT/infra/docker-compose.traefik.yml"
+    else
+        echo -e "${YELLOW}⚠ Traefik not set up${NC}"
+        echo "You'll need to configure it manually before deploying apps."
+        echo "For instructions, see: https://docs.traefik.io/"
+    fi
+else
+    echo -e "${GREEN}✓ Traefik${NC} running"
+    echo -e "${GREEN}✓ Network 'coolify'${NC} exists"
+fi
+
+echo ""
+
+# ============================================================================
 # STEP 2: Environment Configuration
 # ============================================================================
 
-echo -e "${YELLOW}[2/5]${NC} Setting up environment..."
+echo -e "${YELLOW}[2/6]${NC} Setting up environment..."
 echo ""
-
-# Parse command line arguments
-DOMAIN=""
-PASSWORD=""
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --domain)
-            DOMAIN="$2"
-            shift 2
-            ;;
-        --password)
-            PASSWORD="$2"
-            shift 2
-            ;;
-        *)
-            shift
-            ;;
-    esac
-done
 
 # Prompt for domain if not provided
 if [ -z "$DOMAIN" ]; then
@@ -152,7 +247,7 @@ echo ""
 # STEP 3: Install Dependencies
 # ============================================================================
 
-echo -e "${YELLOW}[3/5]${NC} Installing dependencies..."
+echo -e "${YELLOW}[3/6]${NC} Installing dependencies..."
 echo ""
 
 # Scheduler
@@ -177,7 +272,7 @@ echo ""
 # STEP 4: Setup Scheduler Cron Job
 # ============================================================================
 
-echo -e "${YELLOW}[4/5]${NC} Setting up scheduler cron job..."
+echo -e "${YELLOW}[4/6]${NC} Setting up scheduler cron job..."
 echo ""
 
 CRON_CMD="$CRON_SCHEDULE /bin/bash $FACTORY_ROOT/scripts/scheduler.sh >> $FACTORY_ROOT/factory.log 2>&1"
@@ -202,7 +297,7 @@ echo ""
 # STEP 5: Summary & Next Steps
 # ============================================================================
 
-echo -e "${YELLOW}[5/5]${NC} Setup complete! 🎉"
+echo -e "${YELLOW}[6/6]${NC} Setup complete! 🎉"
 echo ""
 
 echo -e "${BLUE}Next steps:${NC}"

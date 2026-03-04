@@ -1,5 +1,4 @@
 export enum TaskStatus {
-  CREATED = "CREATED",
   TRIAGE = "TRIAGE",
   READY = "READY",
   APPROVED = "APPROVED",
@@ -7,9 +6,7 @@ export enum TaskStatus {
   IN_PROGRESS = "IN_PROGRESS",
   AUDITING = "AUDITING",
   DONE = "DONE",
-  SUCCESS = "SUCCESS",
-  FAILED = "FAILED",
-  FAILURE = "FAILURE"
+  FAILED = "FAILED"
 }
 
 export interface Task {

@@ -5,7 +5,6 @@ const DEFAULT_DB_PATH = process.env.FACTORY_DB_PATH ?? "/home/szewa/app-factory/
 
 type StatusRow = { status: string };
 type BusyTaskRow = { id: number; project_name: string | null };
-type CreatedTaskRow = { id: number; depends_on: string };
 type CandidateRow = {
   id: number;
   project_name: string | null;
@@ -23,11 +22,6 @@ type AuditNotesRow = { audit_notes: string | null };
 export interface BusyTask {
   id: number;
   project_name: string | null;
-}
-
-export interface CreatedTask {
-  id: number;
-  depends_on: string;
 }
 
 export interface TaskCandidate {
@@ -53,12 +47,6 @@ const GET_TASK_STATUS_SQL = `
   FROM tasks
   WHERE id = ?
   LIMIT 1
-`;
-
-const GET_CREATED_TASKS_SQL = `
-  SELECT id, COALESCE(depends_on, '') AS depends_on
-  FROM tasks
-  WHERE status = 'CREATED'
 `;
 
 const GET_READY_OR_APPROVED_CANDIDATES_SQL = `
@@ -174,7 +162,6 @@ export interface TriageTask {
 
 function parseTaskStatus(rawStatus: string): TaskStatus {
   switch (rawStatus) {
-    case TaskStatus.CREATED:
     case TaskStatus.TRIAGE:
     case TaskStatus.READY:
     case TaskStatus.APPROVED:
@@ -182,9 +169,7 @@ function parseTaskStatus(rawStatus: string): TaskStatus {
     case TaskStatus.IN_PROGRESS:
     case TaskStatus.AUDITING:
     case TaskStatus.DONE:
-    case TaskStatus.SUCCESS:
     case TaskStatus.FAILED:
-    case TaskStatus.FAILURE:
       return rawStatus;
     default:
       throw new Error(`Unexpected task status from database: ${rawStatus}`);
@@ -210,7 +195,6 @@ export class SchedulerDatabase {
   private readonly db: Database.Database;
   private readonly getBusyTasksStmt: Database.Statement<[], BusyTaskRow>;
   private readonly getTaskStatusStmt: Database.Statement<[number], StatusRow>;
-  private readonly getCreatedTasksStmt: Database.Statement<[], CreatedTaskRow>;
   private readonly getReadyOrApprovedCandidatesStmt: Database.Statement<[], CandidateRow>;
   private readonly getProjectDomainStmt: Database.Statement<[string], ProjectDomainRow>;
   private readonly getTaskAuditNotesStmt: Database.Statement<[number], AuditNotesRow>;
@@ -229,7 +213,6 @@ export class SchedulerDatabase {
     this.db = new Database(dbPath);
     this.getBusyTasksStmt = this.db.prepare(GET_BUSY_TASKS_SQL);
     this.getTaskStatusStmt = this.db.prepare(GET_TASK_STATUS_SQL);
-    this.getCreatedTasksStmt = this.db.prepare(GET_CREATED_TASKS_SQL);
     this.getReadyOrApprovedCandidatesStmt = this.db.prepare(GET_READY_OR_APPROVED_CANDIDATES_SQL);
     this.getProjectDomainStmt = this.db.prepare(GET_PROJECT_DOMAIN_SQL);
     this.getTaskAuditNotesStmt = this.db.prepare(GET_TASK_AUDIT_NOTES_SQL);
@@ -259,13 +242,6 @@ export class SchedulerDatabase {
     }
 
     return parseTaskStatus(row.status);
-  }
-
-  getCreatedTasks(): CreatedTask[] {
-    return this.getCreatedTasksStmt.all().map((row) => ({
-      id: row.id,
-      depends_on: row.depends_on
-    }));
   }
 
   getReadyOrApprovedCandidates(): TaskCandidate[] {

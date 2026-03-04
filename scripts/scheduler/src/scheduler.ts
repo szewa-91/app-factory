@@ -138,22 +138,8 @@ function recoverStaleTasks(database: SchedulerDatabase): boolean {
   return false;
 }
 
-function promoteTasks(database: SchedulerDatabase): void {
-  // Promote CREATED tasks to TRIAGE
-  const createdTasks = database.getCreatedTasks();
-  for (const task of createdTasks) {
-    if (!task.depends_on) {
-      database.updateTaskStatusPlain(task.id, TaskStatus.TRIAGE);
-      continue;
-    }
-
-    if (dependenciesDone(task.depends_on, database)) {
-      log(`[INFO] Promoting Task ${task.id} to TRIAGE (dependencies met).`);
-      database.updateTaskStatusPlain(task.id, TaskStatus.TRIAGE);
-    }
-  }
-
-  // Triage TRIAGE tasks and move to READY or PENDING_APPROVAL
+function triagePendingTasks(database: SchedulerDatabase): void {
+  // Evaluate TRIAGE tasks and move to READY or PENDING_APPROVAL
   const triageTasks = database.getTriageTasks();
   for (const task of triageTasks) {
     const result = triageTask({
@@ -287,7 +273,7 @@ export async function runSchedulerCycle(
     return { status: "already_busy", taskId: null, cpu: 0, ram: 0, reason: "busy" };
   }
 
-  promoteTasks(database);
+  triagePendingTasks(database);
 
   const resources = await checkResources();
   log(`[RESOURCES] CPU: ${resources.cpu}% | RAM: ${resources.ram}%`);

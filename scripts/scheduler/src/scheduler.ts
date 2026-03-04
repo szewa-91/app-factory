@@ -2,13 +2,14 @@ import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { checkResources } from "./resources.js";
 import { dependenciesDone } from "./dependencies.js";
-import { getPreviousFailureLogName, getTaskLogName, runAgent } from "./agent-runner.js";
+import { getPreviousFailureLogName, getTaskLogName, runAgent, AgentRole } from "./agent-runner.js";
 import { runAuditPipeline } from "./audit.js";
 import { BusyTask, getSchedulerDatabase, SchedulerDatabase, TaskCandidate } from "./db.js";
 import { captureFailureContext } from "./failure-context.js";
 import { recordPreTaskSha, resetToSha } from "./git-safety.js";
 import { readSharedKnowledge } from "./shared-knowledge.js";
 import { TaskStatus } from "./types.js";
+import { triageTask } from "./triage.js";
 
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR ?? "/home/szewa/app-factory";
 const LOG_FILE = process.env.FACTORY_LOG_FILE ?? `${WORKSPACE_DIR}/factory.log`;
@@ -137,19 +138,33 @@ function recoverStaleTasks(database: SchedulerDatabase): boolean {
   return false;
 }
 
-function promoteCreatedTasks(database: SchedulerDatabase): void {
+function promoteTasks(database: SchedulerDatabase): void {
+  // Promote CREATED tasks to TRIAGE
   const createdTasks = database.getCreatedTasks();
-
   for (const task of createdTasks) {
     if (!task.depends_on) {
-      database.updateTaskStatusPlain(task.id, TaskStatus.READY);
+      database.updateTaskStatusPlain(task.id, TaskStatus.TRIAGE);
       continue;
     }
 
     if (dependenciesDone(task.depends_on, database)) {
-      log(`[INFO] Activating Task ${task.id} (dependencies met).`);
-      database.updateTaskStatusPlain(task.id, TaskStatus.READY);
+      log(`[INFO] Promoting Task ${task.id} to TRIAGE (dependencies met).`);
+      database.updateTaskStatusPlain(task.id, TaskStatus.TRIAGE);
     }
+  }
+
+  // Triage TRIAGE tasks and move to READY or PENDING_APPROVAL
+  const triageTasks = database.getTriageTasks();
+  for (const task of triageTasks) {
+    const result = triageTask({
+      title: task.title,
+      description: task.description,
+      priority: task.priority
+    });
+
+    const targetStatus = result.difficulty === "high" ? TaskStatus.PENDING_APPROVAL : TaskStatus.READY;
+    database.assignTriageTask(task.id, result.agentRole, targetStatus, nowIso());
+    log(`[INFO] Task ${task.id} triaged: difficulty=${result.difficulty}, role=${result.agentRole}, status=${targetStatus}`);
   }
 }
 
@@ -272,7 +287,7 @@ export async function runSchedulerCycle(
     return { status: "already_busy", taskId: null, cpu: 0, ram: 0, reason: "busy" };
   }
 
-  promoteCreatedTasks(database);
+  promoteTasks(database);
 
   const resources = await checkResources();
   log(`[RESOURCES] CPU: ${resources.cpu}% | RAM: ${resources.ram}%`);
@@ -338,7 +353,8 @@ export async function runSchedulerCycle(
 
   log(`[AGENT_START] Task [${task.id}] in ${projectPath} (Log: ${getTaskLogName(task.id)})`);
   process.env.APP_FACTORY_HEADLESS = "true";
-  const exitCode = await runAgent(projectPath, prompt, taskLogPath, true, "developer");
+  const agentRole = (task.assigned_agent ?? "developer") as AgentRole;
+  const exitCode = await runAgent(projectPath, prompt, taskLogPath, true, agentRole);
 
   if (exitCode === 127) {
     log("[ERROR] Agent binary not found (all providers in chain returned 127).");

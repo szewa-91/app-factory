@@ -15,6 +15,7 @@ type CandidateRow = {
   depends_on: string;
   status: string;
   priority: number;
+  assigned_agent: string | null;
 };
 type ProjectDomainRow = { domain: string | null };
 type AuditNotesRow = { audit_notes: string | null };
@@ -38,6 +39,7 @@ export interface TaskCandidate {
   depends_on: string;
   status: TaskStatus;
   priority: number;
+  assigned_agent: string | null;
 }
 
 const GET_BUSY_TASKS_SQL = `
@@ -68,7 +70,8 @@ const GET_READY_OR_APPROVED_CANDIDATES_SQL = `
     COALESCE(retry_count, 0) AS retry_count,
     COALESCE(depends_on, '') AS depends_on,
     status,
-    COALESCE(priority, 0) AS priority
+    COALESCE(priority, 0) AS priority,
+    assigned_agent
   FROM tasks
   WHERE status IN ('READY', 'APPROVED')
   ORDER BY COALESCE(priority, 0) DESC, created_at ASC
@@ -137,9 +140,42 @@ const MARK_TASK_FAILED_NO_NOTES_SQL = `
   WHERE id = ?
 `;
 
+const GET_TRIAGE_TASKS_SQL = `
+  SELECT
+    id,
+    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(title, ''), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), CHAR(31), ' ') AS title,
+    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(description, ''), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), CHAR(31), ' ') AS description,
+    COALESCE(priority, 0) AS priority
+  FROM tasks
+  WHERE status = 'TRIAGE'
+  ORDER BY created_at ASC
+`;
+
+const ASSIGN_TRIAGE_TASK_SQL = `
+  UPDATE tasks
+  SET assigned_agent = ?, status = ?, updated_at = ?
+  WHERE id = ?
+    AND status = 'TRIAGE'
+`;
+
+type TriageTaskRow = {
+  id: number;
+  title: string;
+  description: string;
+  priority: number;
+};
+
+export interface TriageTask {
+  id: number;
+  title: string;
+  description: string;
+  priority: number;
+}
+
 function parseTaskStatus(rawStatus: string): TaskStatus {
   switch (rawStatus) {
     case TaskStatus.CREATED:
+    case TaskStatus.TRIAGE:
     case TaskStatus.READY:
     case TaskStatus.APPROVED:
     case TaskStatus.PENDING_APPROVAL:
@@ -186,6 +222,8 @@ export class SchedulerDatabase {
   private readonly markTaskReadyForRetryStmt: Database.Statement<[string, string, number]>;
   private readonly markTaskFailedStmt: Database.Statement<[string, string, number]>;
   private readonly markTaskFailedNoNotesStmt: Database.Statement<[string, number]>;
+  private readonly getTriageTasksStmt: Database.Statement<[], TriageTaskRow>;
+  private readonly assignTriageTaskStmt: Database.Statement<[string, TaskStatus, string, number]>;
 
   constructor(dbPath: string = DEFAULT_DB_PATH) {
     this.db = new Database(dbPath);
@@ -203,6 +241,8 @@ export class SchedulerDatabase {
     this.markTaskReadyForRetryStmt = this.db.prepare(MARK_TASK_READY_FOR_RETRY_SQL);
     this.markTaskFailedStmt = this.db.prepare(MARK_TASK_FAILED_SQL);
     this.markTaskFailedNoNotesStmt = this.db.prepare(MARK_TASK_FAILED_NO_NOTES_SQL);
+    this.getTriageTasksStmt = this.db.prepare(GET_TRIAGE_TASKS_SQL);
+    this.assignTriageTaskStmt = this.db.prepare(ASSIGN_TRIAGE_TASK_SQL);
   }
 
   getBusyTasks(): BusyTask[] {
@@ -237,8 +277,23 @@ export class SchedulerDatabase {
       retry_count: toNumber(row.retry_count),
       depends_on: row.depends_on,
       status: parseTaskStatus(row.status),
+      priority: toNumber(row.priority),
+      assigned_agent: row.assigned_agent
+    }));
+  }
+
+  getTriageTasks(): TriageTask[] {
+    return this.getTriageTasksStmt.all().map((row) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
       priority: toNumber(row.priority)
     }));
+  }
+
+  assignTriageTask(taskId: number, agentRole: string, status: TaskStatus, updatedAt: string): number {
+    const result = this.assignTriageTaskStmt.run(agentRole, status, updatedAt, taskId);
+    return result.changes;
   }
 
   getProjectDomain(projectName: string): string | null {

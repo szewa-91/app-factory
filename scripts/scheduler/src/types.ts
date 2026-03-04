@@ -1,5 +1,6 @@
 export enum TaskStatus {
   CREATED = "CREATED",
+  TRIAGE = "TRIAGE",
   READY = "READY",
   APPROVED = "APPROVED",
   PENDING_APPROVAL = "PENDING_APPROVAL",
@@ -23,6 +24,7 @@ export interface Task {
   retry_count: number;
   depends_on: string | null;
   audit_notes: string | null;
+  assigned_agent: string | null;
 }
 
 export interface Project {

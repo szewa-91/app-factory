@@ -12,7 +12,7 @@ const GEMINI_CAPACITY = ["You have exhausted your capacity on this model"];
 const CLAUDE_CAPACITY = ["rate_limit_error", "Rate limit reached", "rate limit exceeded", "overloaded_error", "You've hit your limit", "you've hit your limit"];
 const CODEX_CAPACITY  = ["rate limit", "Rate limit", "429", "quota exceeded"];
 
-export type AgentRole = "developer" | "auditor" | "launchNotes";
+export type AgentRole = "developer" | "auditor" | "launchNotes" | "ui-developer" | "architect";
 
 interface AgentEntry {
   binary: string;
@@ -66,6 +66,15 @@ function buildChain(role: AgentRole): AgentEntry[] {
       { binary: GEMINI_BIN, model: "gemini-3-flash",     buildArgs: (p) => ["--yolo", "-m", "gemini-3-flash", p], capacityMessages: GEMINI_CAPACITY },
       { binary: CLAUDE_BIN, model: "claude-haiku-4-5",   buildArgs: (p) => ["-p", "--model", "claude-haiku-4-5", "--dangerously-skip-permissions", p], capacityMessages: CLAUDE_CAPACITY },
       { binary: CODEX_BIN,  model: "gpt-5.1-codex-mini", buildArgs: (p, d) => ["exec", "-m", "gpt-5.1-codex-mini", "--dangerously-bypass-approvals-and-sandbox", "-C", d, p], capacityMessages: [] },
+    ];
+    case "ui-developer": return [
+      { binary: CLAUDE_BIN, model: "claude-sonnet-4-6", buildArgs: (p) => ["-p", "--model", "claude-sonnet-4-6", "--effort", "low", "--dangerously-skip-permissions", p], capacityMessages: CLAUDE_CAPACITY },
+      { binary: GEMINI_BIN, model: "gemini-3-flash", buildArgs: (p) => ["--yolo", "-m", "gemini-3-flash", p], capacityMessages: GEMINI_CAPACITY },
+    ];
+    case "architect": return [
+      { binary: CODEX_BIN, model: "gpt-5.3-codex", buildArgs: (p, d) => ["exec", "-m", "gpt-5.3-codex", "-c", "model_reasoning_effort=high", "--dangerously-bypass-approvals-and-sandbox", "-C", d, p], capacityMessages: CODEX_CAPACITY },
+      { binary: CLAUDE_BIN, model: "claude-sonnet-4-6", buildArgs: (p) => ["-p", "--model", "claude-sonnet-4-6", "--effort", "high", "--dangerously-skip-permissions", p], capacityMessages: CLAUDE_CAPACITY },
+      { binary: GEMINI_BIN, model: "gemini-3.1-pro-preview", buildArgs: (p) => ["--yolo", "-m", "gemini-3.1-pro-preview", p], capacityMessages: [] },
     ];
   }
 }

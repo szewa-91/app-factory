@@ -1,0 +1,102 @@
+#!/bin/bash
+# App Factory Deployment Script - ${APP_NAME}
+
+set -Eeuo pipefail
+
+APP_PORT=${APP_PORT}
+
+require_cmd() {
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ ERROR: Required command not found: $cmd"
+        exit 1
+    fi
+}
+
+validate_port() {
+    local port="$1"
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "❌ ERROR: APP_PORT must be a valid TCP port (got: '$port')."
+        exit 1
+    fi
+}
+
+require_coolify_network() {
+    if ! docker network inspect coolify >/dev/null 2>&1; then
+        echo "❌ ERROR: Required Docker network 'coolify' was not found."
+        exit 1
+    fi
+}
+
+container_running() {
+    docker compose ps --status running --services 2>/dev/null | grep -qx "app"
+}
+
+app_responsive() {
+    docker compose exec -T app curl -fsS "http://localhost:${APP_PORT}" >/dev/null
+}
+
+echo "🚀 Starting deployment for ${APP_NAME}..."
+require_cmd docker
+require_cmd npx
+validate_port "$APP_PORT"
+if ! docker compose version >/dev/null 2>&1; then
+    echo "❌ ERROR: docker compose plugin is required."
+    exit 1
+fi
+if ! docker compose config >/dev/null 2>&1; then
+    echo "❌ ERROR: docker compose configuration is invalid."
+    exit 1
+fi
+require_coolify_network
+
+# Ensure data directory exists for SQLite
+mkdir -p data
+chown -R 1000:1000 data
+
+# Generate Prisma Client (if prisma directory exists)
+if [ -d "prisma" ]; then
+    echo "💎 Generating Prisma Client..."
+    npx prisma generate
+fi
+
+# Rebuild and restart containers
+echo "📦 Building and restarting Docker containers..."
+APP_NAME=${APP_NAME} DOMAIN=${DOMAIN} APP_PORT=${APP_PORT} docker compose up -d --build
+
+# Wait for container runtime readiness before applying migrations.
+echo "⏳ Waiting for app container to be running..."
+for attempt in $(seq 1 20); do
+    if container_running; then
+        break
+    fi
+    if [ "$attempt" -eq 20 ]; then
+        echo "❌ ERROR: app container did not reach running state."
+        docker compose ps
+        docker compose logs --tail 50 app
+        exit 1
+    fi
+    sleep 2
+done
+
+echo "⏳ Waiting for internal HTTP readiness on :${APP_PORT}..."
+for attempt in $(seq 1 30); do
+    if app_responsive; then
+        break
+    fi
+    if [ "$attempt" -eq 30 ]; then
+        echo "❌ ERROR: app did not become responsive on localhost:${APP_PORT}."
+        docker compose logs --tail 80 app
+        exit 1
+    fi
+    sleep 2
+done
+
+# Apply migrations if using Prisma
+if [ -d "prisma" ]; then
+    echo "🗄️ Applying database migrations..."
+    # Run with --no-install to prevent npx from pulling a newer major Prisma CLI.
+    npx --no-install prisma migrate deploy
+fi
+
+echo "✅ Deployment complete! App is live at https://${DOMAIN}"

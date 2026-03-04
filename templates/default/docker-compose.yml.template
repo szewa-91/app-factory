@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    container_name: app-factory-${APP_NAME}
+    restart: always
+    networks:
+      - coolify
+    user: "1000:1000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/prod.db
+      - PORT=${APP_PORT}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${APP_PORT} || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${APP_NAME}.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.${APP_NAME}.entrypoints=https"
+      - "traefik.http.routers.${APP_NAME}.tls=true"
+      - "traefik.http.routers.${APP_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${APP_NAME}.loadbalancer.server.port=${APP_PORT}"
+
+networks:
+  coolify:
+    external: true

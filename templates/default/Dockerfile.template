@@ -1,0 +1,54 @@
+# Install dependencies only when needed
+FROM node:20-slim AS deps
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# Install dependencies based on the preferred package manager
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# Rebuild the source code only when needed
+FROM node:20-slim AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Generate Prisma Client
+RUN npx prisma generate
+
+# Build Next.js
+ENV NEXT_TELEMETRY_DISABLED 1
+RUN npm run build
+
+# Production image, copy all the files and run next
+FROM node:20-slim AS runner
+RUN apt-get update && apt-get install -y curl openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
+
+RUN groupadd --system --gid 1001 nodejs
+RUN useradd --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+
+# Set the correct permission for prerender cache
+RUN mkdir .next
+RUN chown nextjs:nodejs .next
+
+# Automatically leverage output traces to reduce image size
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+
+USER nextjs
+
+EXPOSE ${APP_PORT}
+
+ENV PORT ${APP_PORT}
+ENV HOSTNAME "0.0.0.0"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 CMD curl -fsS "http://127.0.0.1:${APP_PORT}" || exit 1
+
+CMD ["node", "server.js"]

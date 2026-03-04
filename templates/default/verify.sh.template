@@ -1,0 +1,128 @@
+#!/bin/bash
+# App Factory Verification Script - ${APP_NAME}
+# Single verification entrypoint for scheduler + local checks.
+
+set -Eeuo pipefail
+
+APP_PORT=${APP_PORT}
+PUBLIC_URL="https://${DOMAIN}"
+SKIP_PUBLIC_HTTPS_PROBE="${SKIP_PUBLIC_HTTPS_PROBE:-0}"
+
+require_cmd() {
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ ERROR: Required command not found: $cmd"
+        exit 1
+    fi
+}
+
+validate_port() {
+    local port="$1"
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "❌ ERROR: APP_PORT must be a valid TCP port (got: '$port')."
+        exit 1
+    fi
+}
+
+container_state() {
+    if docker compose ps --status running --services 2>/dev/null | grep -qx "app"; then
+        echo "running"
+    else
+        echo "not_running"
+    fi
+}
+
+internal_ready() {
+    docker compose exec -T app curl -fsS "http://localhost:${APP_PORT}" >/dev/null
+}
+
+echo "🔍 Starting verification for ${APP_NAME}..."
+require_cmd docker
+require_cmd curl
+validate_port "$APP_PORT"
+if ! docker compose version >/dev/null 2>&1; then
+    echo "❌ ERROR: docker compose plugin is required."
+    exit 1
+fi
+if ! docker compose config >/dev/null 2>&1; then
+    echo "❌ ERROR: docker compose configuration is invalid."
+    exit 1
+fi
+
+# 1. Container state check
+STATE="$(container_state || true)"
+if [ "$STATE" != "running" ]; then
+    echo "❌ ERROR: Container 'app' is not running (state: ${STATE:-unknown})."
+    docker compose ps
+    docker compose logs --tail 50 app
+    exit 1
+fi
+echo "✅ Container state is running."
+
+# 2. Internal readiness probe
+echo "📡 Checking internal readiness on localhost:${APP_PORT}..."
+for attempt in $(seq 1 20); do
+    if internal_ready; then
+        echo "✅ Internal readiness probe passed."
+        break
+    fi
+
+    if [ "$attempt" -eq 20 ]; then
+        echo "❌ ERROR: App not reachable internally on localhost:${APP_PORT}."
+        docker compose logs --tail 80 app
+        exit 1
+    fi
+
+    echo "⏳ Waiting for internal readiness (attempt ${attempt}/20)..."
+    sleep 2
+done
+
+# 3. Unit tests
+if [ -f "package.json" ] && grep -q '"test"' package.json; then
+    require_cmd npm
+    echo "🧪 Running unit tests..."
+    npm run test
+    echo "✅ Unit tests passed."
+fi
+
+# 4. Strict HTTPS trust probe
+if [ "$SKIP_PUBLIC_HTTPS_PROBE" != "1" ]; then
+    echo "🔒 Checking public HTTPS trust at ${PUBLIC_URL}..."
+    for attempt in $(seq 1 24); do
+        if curl -fsS --proto '=https' --tlsv1.2 --connect-timeout 5 "${PUBLIC_URL}" >/dev/null; then
+            echo "✅ Public HTTPS probe passed with certificate validation."
+            break
+        fi
+
+        if [ "$attempt" -eq 24 ]; then
+            echo "❌ ERROR: Public HTTPS probe failed for ${PUBLIC_URL}."
+            exit 1
+        fi
+
+        echo "⏳ Waiting for public HTTPS readiness (attempt ${attempt}/24)..."
+        sleep 5
+    done
+else
+    echo "⚠️ SKIP_PUBLIC_HTTPS_PROBE=1; skipping external TLS verification."
+fi
+
+# 5. E2E tests
+if [ -f "playwright.config.ts" ]; then
+    require_cmd npx
+    E2E_BASE_URL="${PLAYWRIGHT_BASE_URL:-}"
+    if [ -z "$E2E_BASE_URL" ]; then
+        if [ "$SKIP_PUBLIC_HTTPS_PROBE" == "1" ]; then
+            echo "⚠️ Skipping Playwright: set PLAYWRIGHT_BASE_URL when skipping public HTTPS probe."
+        else
+            E2E_BASE_URL="${PUBLIC_URL}"
+        fi
+    fi
+
+    if [ -n "$E2E_BASE_URL" ]; then
+        echo "🎭 Running Playwright E2E tests against ${E2E_BASE_URL}..."
+        PLAYWRIGHT_BASE_URL="${E2E_BASE_URL}" npx playwright test
+        echo "✅ E2E tests passed."
+    fi
+fi
+
+echo "🎉 All verifications passed for ${APP_NAME}."
